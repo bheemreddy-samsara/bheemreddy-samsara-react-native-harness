@@ -31,6 +31,9 @@ export type Harness = {
   restart: () => Promise<void>;
   dispose: () => Promise<void>;
   crashMonitor: CrashMonitor;
+  // Expose bridge events for console forwarding
+  on: (event: string, handler: (...args: unknown[]) => void) => void;
+  off: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
 export const waitForAppReady = async (options: {
@@ -205,6 +208,11 @@ const getHarnessInternal = async (
     restart,
     dispose,
     crashMonitor,
+    // Expose bridge events for console forwarding
+    on: (event: string, handler: (...args: unknown[]) => void) =>
+      serverBridge.on(event as 'event', handler),
+    off: (event: string, handler: (...args: unknown[]) => void) =>
+      serverBridge.off(event as 'event', handler),
   };
 };
 

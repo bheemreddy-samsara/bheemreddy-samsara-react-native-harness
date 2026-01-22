@@ -16,6 +16,63 @@ import { setup } from '../render/setup.js';
 import { runSetupFiles } from './setup-files.js';
 import { setClient } from './store.js';
 
+type ConsoleLevel = 'log' | 'warn' | 'error' | 'info' | 'debug';
+type EmitEventFn = (
+  type: string,
+  data: {
+    type: string;
+    level: ConsoleLevel;
+    args: string[];
+    timestamp: number;
+  }
+) => void;
+
+// Console forwarding setup - intercepts console calls and emits events to host
+const setupConsoleForwarding = (emitEvent: EmitEventFn): (() => void) => {
+  const originalConsole: Record<ConsoleLevel, typeof console.log> = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+    info: console.info,
+    debug: console.debug,
+  };
+
+  const createForwarder =
+    (level: ConsoleLevel) =>
+    (...args: unknown[]) => {
+      // Call original console method
+      originalConsole[level](...args);
+      // Forward to host via bridge
+      try {
+        emitEvent('console', {
+          type: 'console',
+          level,
+          args: args.map((arg) => {
+            try {
+              return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+            } catch {
+              return String(arg);
+            }
+          }),
+          timestamp: Date.now(),
+        });
+      } catch {
+        // Ignore errors during forwarding to avoid infinite loops
+      }
+    };
+
+  console.log = createForwarder('log');
+  console.warn = createForwarder('warn');
+  console.error = createForwarder('error');
+  console.info = createForwarder('info');
+  console.debug = createForwarder('debug');
+
+  // Return cleanup function to restore original console
+  return () => {
+    Object.assign(console, originalConsole);
+  };
+};
+
 export const getClient = async () => {
   const client = await getBridgeClient(getWSServer(), {
     runTests: async () => {
@@ -41,6 +98,7 @@ export const getClient = async () => {
       TestRunnerEvents | TestCollectorEvents | BundlerEvents
     > | null = null;
     let bundler: Bundler | null = null;
+    let cleanupConsole: (() => void) | null = null;
 
     try {
       collector = getTestCollector();
@@ -54,6 +112,15 @@ export const getClient = async () => {
 
       events.addListener((event) => {
         client.rpc.emitEvent(event.type, event);
+      });
+
+      // Setup console forwarding to emit console events to host
+      cleanupConsole = setupConsoleForwarding((type, data) => {
+        // Use type assertion since 'console' is a new event type not in the current type definitions
+        (client.rpc.emitEvent as (type: string, data: unknown) => void)(
+          type,
+          data
+        );
       });
 
       await runSetupFiles({
@@ -94,6 +161,8 @@ export const getClient = async () => {
       });
       return result;
     } finally {
+      // Restore original console
+      cleanupConsole?.();
       collector?.dispose();
       runner?.dispose();
       events?.clearAllListeners();

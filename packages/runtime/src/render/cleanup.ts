@@ -1,7 +1,16 @@
+import { unstable_batchedUpdates } from 'react-native';
 import { store } from '../ui/state.js';
 
 export const cleanup = (): void => {
-  store.getState().setRenderedElement(null);
-  store.getState().setOnLayoutCallback(null);
-  store.getState().setOnRenderCallback(null);
+  const doCleanup = () => {
+    store.getState().setRenderedElement(null);
+    store.getState().setOnLayoutCallback(null);
+    store.getState().setOnRenderCallback(null);
+  };
+
+  if (unstable_batchedUpdates) {
+    unstable_batchedUpdates(doCleanup);
+  } else {
+    doCleanup();
+  }
 };

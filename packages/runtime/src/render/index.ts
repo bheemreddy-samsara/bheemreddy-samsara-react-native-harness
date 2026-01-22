@@ -1,4 +1,5 @@
 import React from 'react';
+import { unstable_batchedUpdates } from 'react-native';
 import { store } from '../ui/state.js';
 import type { RenderResult, RenderOptions } from './types.js';
 
@@ -12,6 +13,15 @@ const wrapElement = (
   return React.createElement(wrapper, { children: element });
 };
 
+// Helper to batch state updates to avoid act() warnings
+const batchedUpdate = (fn: () => void): void => {
+  if (unstable_batchedUpdates) {
+    unstable_batchedUpdates(fn);
+  } else {
+    fn();
+  }
+};
+
 export const render = async (
   element: React.ReactElement,
   options: RenderOptions = {}
@@ -20,9 +30,11 @@ export const render = async (
 
   // If an element is already rendered, unmount it first
   if (store.getState().renderedElement !== null) {
-    store.getState().setRenderedElement(null);
-    store.getState().setOnLayoutCallback(null);
-    store.getState().setOnRenderCallback(null);
+    batchedUpdate(() => {
+      store.getState().setRenderedElement(null);
+      store.getState().setOnLayoutCallback(null);
+      store.getState().setOnRenderCallback(null);
+    });
   }
 
   // Create a promise that resolves when the element is rendered.
@@ -36,15 +48,19 @@ export const render = async (
       );
     }, timeout);
 
-    store.getState().setOnRenderCallback(() => {
-      clearTimeout(timeoutId);
-      resolve();
+    batchedUpdate(() => {
+      store.getState().setOnRenderCallback(() => {
+        clearTimeout(timeoutId);
+        resolve();
+      });
     });
   });
 
   // Wrap and set the element in state (key is generated automatically)
   const wrappedElement = wrapElement(element, wrapper);
-  store.getState().setRenderedElement(wrappedElement);
+  batchedUpdate(() => {
+    store.getState().setRenderedElement(wrappedElement);
+  });
 
   // Wait for useEffect to fire, ensuring all children are committed
   await renderPromise;
@@ -65,14 +81,18 @@ export const render = async (
         );
       }, timeout);
 
-      store.getState().setOnRenderCallback(() => {
-        clearTimeout(timeoutId);
-        resolve();
+      batchedUpdate(() => {
+        store.getState().setOnRenderCallback(() => {
+          clearTimeout(timeoutId);
+          resolve();
+        });
       });
     });
 
     const wrappedNewElement = wrapElement(newElement, wrapper);
-    store.getState().updateRenderedElement(wrappedNewElement);
+    batchedUpdate(() => {
+      store.getState().updateRenderedElement(wrappedNewElement);
+    });
 
     // Wait for render
     await renderPromise;
@@ -83,9 +103,11 @@ export const render = async (
       return;
     }
 
-    store.getState().setRenderedElement(null);
-    store.getState().setOnLayoutCallback(null);
-    store.getState().setOnRenderCallback(null);
+    batchedUpdate(() => {
+      store.getState().setRenderedElement(null);
+      store.getState().setOnLayoutCallback(null);
+      store.getState().setOnRenderCallback(null);
+    });
   };
 
   return {
